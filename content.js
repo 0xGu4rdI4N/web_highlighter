@@ -1,33 +1,144 @@
-let highlightColor = 'yellow';
-const textColor = 'black';
+const style = document.createElement('style');
+style.textContent = `
+    .highlight-toolbar {
+    position: absolute;
+    display: flex;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    z-index: 9999;
+}
 
-document.addEventListener('mouseup', function() {
-    let selection = window.getSelection();
-    let selectedText = selection.toString().trim();
-    if (selectedText.length > 0) {
-        let range = selection.getRangeAt(0);
-        let startNode = range.startContainer;
-        let endNode = range.endContainer;
-        
-        // Check if the selection intersects with a highlight
-        let highlightSpan = findHighlightSpan(startNode) || findHighlightSpan(endNode);
-        
-        if (highlightSpan) {
-            // Remove the highlight
-            removeHighlight(highlightSpan);
-        } else {
-            // Add new highlight
-            let newNode = document.createElement('span');
-            newNode.setAttribute('class', 'custom-highlight');
-            newNode.style.backgroundColor = highlightColor;
-            newNode.style.color = textColor;
-            range.surroundContents(newNode);
-            
-            // Save the highlight
-            saveHighlightToStorage(selectedText, highlightColor);
-        }
+.color-button {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    margin: 0 2px;
+    cursor: pointer;
+}
+
+.delete-button {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    color: #000;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-left: 5px;
+}
+
+.custom-highlight {
+    border-radius: 3px;
+    padding: 2px 0;
+}
+`;
+document.head.appendChild(style);
+
+const highlightColors = ['yellow', 'lightgreen', 'lightblue', 'pink'];
+const textColor = 'black';
+let currentHighlightColor = highlightColors[0];
+
+// Create floating toolbar
+const toolbar = document.createElement('div');
+toolbar.className = 'highlight-toolbar';
+toolbar.style.display = 'none';
+document.body.appendChild(toolbar);
+
+// Add color buttons to toolbar
+highlightColors.forEach(color => {
+    const colorButton = document.createElement('button');
+    colorButton.className = 'color-button';
+    colorButton.style.backgroundColor = color;
+    colorButton.addEventListener('click', () => {
+        currentHighlightColor = color;
+        applyHighlight();
+    });
+    toolbar.appendChild(colorButton);
+});
+
+// Add delete button to toolbar
+const deleteButton = document.createElement('button');
+deleteButton.className = 'delete-button';
+deleteButton.innerHTML = '×';
+deleteButton.addEventListener('click', removeHighlight);
+toolbar.appendChild(deleteButton);
+
+document.addEventListener('mouseup', handleSelection);
+document.addEventListener('mousedown', (e) => {
+    if (!toolbar.contains(e.target)) {
+        toolbar.style.display = 'none';
     }
 });
+
+function handleSelection() {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+
+    if (selectedText.length > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        toolbar.style.display = 'flex';
+        toolbar.style.left = `${rect.left + window.scrollX + (rect.width / 2) - (toolbar.offsetWidth / 2)}px`;
+        toolbar.style.top = `${rect.top + window.scrollY - toolbar.offsetHeight - 10}px`;
+    } else {
+        toolbar.style.display = 'none';
+    }
+}
+
+function applyHighlight() {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+
+    if (selectedText.length > 0) {
+        const range = selection.getRangeAt(0);
+        const highlightSpan = findHighlightSpan(range.startContainer) || findHighlightSpan(range.endContainer);
+
+        if (highlightSpan) {
+            highlightSpan.style.backgroundColor = currentHighlightColor;
+            updateHighlightInStorage(selectedText, currentHighlightColor);
+        } else {
+            const newNode = document.createElement('span');
+            newNode.className = 'custom-highlight';
+            newNode.style.backgroundColor = currentHighlightColor;
+            newNode.style.color = textColor;
+            range.surroundContents(newNode);
+            saveHighlightToStorage(selectedText, currentHighlightColor);
+        }
+
+        toolbar.style.display = 'none';
+        selection.removeAllRanges();
+    }
+}
+
+function removeHighlight() {
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+    const highlightSpan = findHighlightSpan(range.startContainer) || findHighlightSpan(range.endContainer);
+
+    if (highlightSpan) {
+        const highlightedText = highlightSpan.textContent;
+        const parent = highlightSpan.parentNode;
+        while (highlightSpan.firstChild) {
+            parent.insertBefore(highlightSpan.firstChild, highlightSpan);
+        }
+        parent.removeChild(highlightSpan);
+        parent.normalize();
+        removeHighlightFromStorage(highlightedText);
+    }
+
+    toolbar.style.display = 'none';
+    selection.removeAllRanges();
+}
 
 function findHighlightSpan(node) {
     while (node && node !== document.body) {
@@ -39,41 +150,28 @@ function findHighlightSpan(node) {
     return null;
 }
 
-function removeHighlight(highlightSpan) {
-    let highlightedText = highlightSpan.textContent;
-    let parent = highlightSpan.parentNode;
-    while (highlightSpan.firstChild) {
-        parent.insertBefore(highlightSpan.firstChild, highlightSpan);
-    }
-    parent.removeChild(highlightSpan);
-    parent.normalize(); // Combine adjacent text nodes
-    
-    // Remove from storage
-    removeHighlightFromStorage(highlightedText);
-}
-
 // Load and apply saved highlights
 window.addEventListener('load', function() {
     chrome.storage.sync.get({highlights: {}}, function(result) {
         let highlights = result.highlights[window.location.href];
         if (highlights) {
             highlights.forEach(function(highlight) {
-                applyHighlight(highlight.text, highlight.color);
+                applyHighlightToText(highlight.text, highlight.color);
             });
         }
     });
 });
 
-function applyHighlight(text, color) {
-    let textNodes = getTextNodes();
+function applyHighlightToText(text, color) {
+    const textNodes = getTextNodes();
     textNodes.forEach(function(node) {
-        let index = node.textContent.indexOf(text);
+        const index = node.textContent.indexOf(text);
         if (index >= 0) {
-            let range = document.createRange();
+            const range = document.createRange();
             range.setStart(node, index);
             range.setEnd(node, index + text.length);
-            let newNode = document.createElement('span');
-            newNode.setAttribute('class', 'custom-highlight');
+            const newNode = document.createElement('span');
+            newNode.className = 'custom-highlight';
             newNode.style.backgroundColor = color;
             newNode.style.color = textColor;
             range.surroundContents(newNode);
@@ -82,7 +180,7 @@ function applyHighlight(text, color) {
 }
 
 function getTextNodes() {
-    let textNodes = [];
+    const textNodes = [];
     function getTextNodesHelper(node) {
         if (node.nodeType == Node.TEXT_NODE) {
             textNodes.push(node);
@@ -110,6 +208,19 @@ function saveHighlightToStorage(text, color) {
     });
 }
 
+function updateHighlightInStorage(text, color) {
+    chrome.storage.sync.get({highlights: {}}, function(result) {
+        let highlights = result.highlights;
+        if (highlights[window.location.href]) {
+            const index = highlights[window.location.href].findIndex(h => h.text === text);
+            if (index !== -1) {
+                highlights[window.location.href][index].color = color;
+                chrome.storage.sync.set({highlights: highlights});
+            }
+        }
+    });
+}
+
 function removeHighlightFromStorage(text) {
     chrome.storage.sync.get({highlights: {}}, function(result) {
         let highlights = result.highlights;
@@ -119,21 +230,3 @@ function removeHighlightFromStorage(text) {
         }
     });
 }
-
-// Add message listener
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    if (request.action === "setColor") {
-        highlightColor = request.color;
-    } else if (request.action === "clearHighlights") {
-        let highlights = document.getElementsByClassName('custom-highlight');
-        while(highlights.length > 0){
-            removeHighlight(highlights[0]);
-        }
-        // Clear stored highlights for this page
-        chrome.storage.sync.get({highlights: {}}, function(result) {
-            let highlights = result.highlights;
-            delete highlights[window.location.href];
-            chrome.storage.sync.set({highlights: highlights});
-        });
-    }
-});
